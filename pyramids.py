@@ -1,75 +1,82 @@
-# In this file we collect from the coordinates given in data.py and form a complete list of vertices to be rendered
+import numpy as np
+import math
+import gdist
+from collections import defaultdict
 
-# importing all coordinates from data.py
-from data import (
-    v1,
-    v2_base, v2_apex,
-    v3_base, v3_apex,
-    v4_base, v4_apex,
-    v5_base, v5_apex
-)
+from data import vertices, faces, start_idx, target_idx
 
-faces = []
+def euclidean_distance(p1, p2):
+    return math.sqrt(np.sum((p1 - p2) ** 2))
 
-# lightblue pyramid
-faces += [
-    [v1[0], v1[1], v1[4]],
-    [v1[1], v1[2], v1[4]],
-    [v1[2], v1[3], v1[4]],
-    [v1[3], v1[0], v1[4]],
-    [v1[0], v1[1], v1[2], v1[3]]
-]
+def ray_triangle_intersect(origin, direction, v0, v1, v2, eps=1e-6):
+    edge1 = v1 - v0
+    edge2 = v2 - v0
+    h = np.cross(direction, edge2)
+    a = np.dot(edge1, h)
+    if abs(a) < eps:
+        return None
+    f = 1.0 / a
+    s = origin - v0
+    u = f * np.dot(s, h)
+    if u < 0.0 or u > 1.0:
+        return None
+    q = np.cross(s, edge1)
+    v = f * np.dot(direction, q)
+    if v < 0.0 or u + v > 1.0:
+        return None
+    t = f * np.dot(edge2, q)
+    if t > eps:
+        intersection_point = origin + direction * t
+        return intersection_point, t
+    return None
 
-# orange pyramid
-faces += [
-    [v2_base[0], v2_base[1], v2_apex],
-    [v2_base[1], v2_base[2], v2_apex],
-    [v2_base[2], v2_base[3], v2_apex],
-    [v2_base[3], v2_base[0], v2_apex],
-    [v2_base[0], v2_base[1], v2_base[2], v2_base[3]]
-]
+start_point = vertices[start_idx]
+target_point = vertices[target_idx]
 
-# lightgreen pyramid
-faces += [
-    [v3_base[0], v3_base[1], v3_apex],
-    [v3_base[1], v3_base[2], v3_apex],
-    [v3_base[2], v3_base[3], v3_apex],
-    [v3_base[3], v3_base[0], v3_apex],
-    [v3_base[0], v3_base[1], v3_base[2], v3_base[3]]
-]
+direct_distance = euclidean_distance(start_point, target_point)
 
-# violet pyramid
-faces += [
-    [v4_base[0], v4_base[1], v4_apex],
-    [v4_base[1], v4_base[2], v4_apex],
-    [v4_base[2], v4_base[3], v4_apex],
-    [v4_base[3], v4_base[0], v4_apex],
-    [v4_base[0], v4_base[1], v4_base[2], v4_base[3]]
-]
+source_indices = np.array([start_idx], dtype=np.int32)
+distances = gdist.compute_gdist(vertices, faces, source_indices)
+geodesic_distance = distances[target_idx]
 
-# gold pyramid
-faces += [
-    [v5_base[0], v5_base[1], v5_apex],
-    [v5_base[1], v5_base[2], v5_apex],
-    [v5_base[2], v5_base[3], v5_apex],
-    [v5_base[3], v5_base[0], v5_apex],
-    [v5_base[0], v5_base[1], v5_base[2], v5_base[3]]
-]
+neighbors = defaultdict(set)
+for triangle in faces:
+    a, b, c = triangle
+    neighbors[a].update([b, c])
+    neighbors[b].update([a, c])
+    neighbors[c].update([a, b])
 
-# colors for 25 faces
-colors = (
-    ['lightblue'] * 5 +
-    ['orange'] * 5 +
-    ['lightgreen'] * 5 +
-    ['violet'] * 5 +
-    ['gold'] * 5
-)
+path = [target_idx]
+current = target_idx
+while current != start_idx:
+    current_dist = distances[current]
+    next_vertex = min(neighbors[current], key=lambda n: distances[n])
+    if distances[next_vertex] >= current_dist:
+        break
+    path.append(next_vertex)
+    current = next_vertex
+path = path[::-1]
+geodesic_path = vertices[path]
 
-# Here we collect all the vertices of all five pyramids into one even list to then draw them with red dots.
-all_vertices = (
-    v1[:4] + [v1[4]] +
-    v2_base + [v2_apex] +
-    v3_base + [v3_apex] +
-    v4_base + [v4_apex] +
-    v5_base + [v5_apex]
+num_samples = 200
+max_z = vertices[:, 2].max() + 1.0
+orange_path = []
+for t in np.linspace(0, 1, num_samples):
+    point_on_line = start_point + t * (target_point - start_point)
+    ray_origin = np.array([point_on_line[0], point_on_line[1], max_z])
+    ray_direction = np.array([0.0, 0.0, -1.0])
+    best_hit, min_t = None, float('inf')
+    for triangle in faces:
+        a, b, c = vertices[triangle]
+        result = ray_triangle_intersect(ray_origin, ray_direction, a, b, c)
+        if result is not None and result[1] < min_t:
+            best_hit, min_t = result
+    if best_hit is None:
+        best_hit = np.array([point_on_line[0], point_on_line[1], 0.0])
+    orange_path.append(best_hit)
+orange_path = np.array(orange_path)
+
+orange_distance = sum(
+    euclidean_distance(orange_path[i], orange_path[i+1])
+    for i in range(len(orange_path) - 1)
 )
